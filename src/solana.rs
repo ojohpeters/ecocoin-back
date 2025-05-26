@@ -13,6 +13,7 @@ use solana_transaction_status::{
 };
 use spl_associated_token_account::get_associated_token_address;
 use spl_token::instruction::transfer_checked;
+use spl_token::ID as TOKEN_PROGRAM_ID;
 use std::{env, str::FromStr};
 
 const REQUIRED_LAMPORTS: u64 = 6_000; // 0.006 SOL
@@ -132,10 +133,10 @@ pub async fn send_tokens(to_wallet: &str, token_amount: i32) -> Result<(), AppEr
         println!("📦 ATA not found for {} — creating it...", to_wallet);
         let create_ata_ix =
             spl_associated_token_account::instruction::create_associated_token_account(
-                &payer_pubkey,  // Fee payer
-                &to_pubkey,     // Wallet to receive token
-                &mint,          // Mint address
-                &spl_token::ID, // Token program ID (REQUIRED)
+                &payer_pubkey,     // Fee payer
+                &to_pubkey,        // Wallet to receive token
+                &mint,             // Mint address
+                &TOKEN_PROGRAM_ID, // Token program ID (REQUIRED)
             );
 
         let blockhash = rpc.get_latest_blockhash().map_err(|_| {
