@@ -134,9 +134,9 @@ pub async fn send_tokens(to_wallet: &str, token_amount: i32) -> Result<(), AppEr
         let create_ata_ix =
             spl_associated_token_account::instruction::create_associated_token_account(
                 &payer_pubkey,     // Fee payer
-                &to_pubkey,        // Wallet to receive token
-                &mint,             // Mint address
-                &TOKEN_PROGRAM_ID, // Token program ID (REQUIRED)
+                &to_pubkey,        // User receiving token
+                &mint,             // Your SPL token mint
+                &TOKEN_PROGRAM_ID, // ✅ SPL Token Program ID
             );
 
         let blockhash = rpc.get_latest_blockhash().map_err(|_| {
