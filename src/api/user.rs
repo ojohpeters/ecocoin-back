@@ -122,7 +122,7 @@ pub async fn claim_airdrop(
         .await
         .map_err(|_| AppError::new(StatusCode::INTERNAL_SERVER_ERROR, "Fee check failed"))?;
 
-    if paid {
+    if !paid {
         return Err(AppError::new(StatusCode::BAD_REQUEST, "Fee not detected"));
     }
 
