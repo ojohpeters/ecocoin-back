@@ -93,7 +93,6 @@ pub async fn check_fee_paid(user_wallet: &str) -> Result<bool, AppError> {
 
     Ok(false)
 }
-
 pub async fn send_tokens(to_wallet: &str, token_amount: i32) -> Result<(), AppError> {
     let rpc_url = env::var("SOLANA_RPC_URL")
         .map_err(|_| AppError::new(StatusCode::INTERNAL_SERVER_ERROR, "Missing SOLANA_RPC_URL"))?;
@@ -112,9 +111,9 @@ pub async fn send_tokens(to_wallet: &str, token_amount: i32) -> Result<(), AppEr
             "Failed to load wallet keypair",
         )
     })?;
-    println!("🔑 Airdrop wallet address: {}", payer.pubkey());
 
     let payer_pubkey = payer.pubkey();
+    println!("🔑 Airdrop wallet: {}", payer_pubkey);
 
     let mint = Pubkey::from_str(
         &env::var("TOKEN_MINT")
@@ -128,47 +127,81 @@ pub async fn send_tokens(to_wallet: &str, token_amount: i32) -> Result<(), AppEr
     let payer_token_account = get_associated_token_address(&payer_pubkey, &mint);
     let recipient_token_account = get_associated_token_address(&to_pubkey, &mint);
 
-    // Create ATA if it doesn't exist
-    if rpc.get_account(&recipient_token_account).is_err() {
-        println!("📦 ATA not found for {} — creating it...", to_wallet);
-        let create_ata_ix =
-            spl_associated_token_account::instruction::create_associated_token_account(
-                &payer_pubkey,     // Fee payer
-                &to_pubkey,        // User receiving token
-                &mint,             // Your SPL token mint
-                &TOKEN_PROGRAM_ID, // ✅ SPL Token Program ID
-            );
+    // Check if ATA exists
+    match rpc.get_account(&recipient_token_account) {
+        Ok(ata_account) => {
+            if ata_account.owner != TOKEN_PROGRAM_ID {
+                return Err(AppError::new(
+                    StatusCode::BAD_REQUEST,
+                    "❌ ATA exists but owned by wrong program",
+                ));
+            }
+            println!("✅ ATA already exists for {}", to_wallet);
+        }
+        Err(_) => {
+            println!("📦 ATA not found for {} — creating it...", to_wallet);
 
-        let blockhash = rpc.get_latest_blockhash().map_err(|_| {
-            AppError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to fetch blockhash for ATA creation",
-            )
-        })?;
+            let create_ata_ix =
+                spl_associated_token_account::instruction::create_associated_token_account(
+                    &payer_pubkey,
+                    &to_pubkey,
+                    &mint,
+                    &TOKEN_PROGRAM_ID,
+                );
 
-        let create_ata_tx = Transaction::new_signed_with_payer(
-            &[create_ata_ix],
-            Some(&payer_pubkey),
-            &[&payer],
-            blockhash,
-        );
-
-        rpc.send_and_confirm_transaction(&create_ata_tx)
-            .map_err(|e| {
+            let blockhash = rpc.get_latest_blockhash().map_err(|_| {
                 AppError::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to create ATA: {}", e),
+                    "Failed to fetch blockhash for ATA creation",
                 )
             })?;
 
-        println!("✅ ATA created for {}", to_wallet);
+            let ata_tx = Transaction::new_signed_with_payer(
+                &[create_ata_ix],
+                Some(&payer_pubkey),
+                &[&payer],
+                blockhash,
+            );
+
+            // 🔍 Simulate ATA creation
+            match rpc.simulate_transaction(&ata_tx) {
+                Ok(sim) => {
+                    if let Some(err) = sim.value.err {
+                        println!("🧨 ATA simulation error: {:?}", err);
+                        if let Some(logs) = sim.value.logs {
+                            for log in logs {
+                                println!("🪵 {}", log);
+                            }
+                        }
+                        return Err(AppError::new(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("ATA creation simulation failed: {:?}", err),
+                        ));
+                    } else {
+                        println!("🧪 ATA simulation passed ✅");
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Simulation RPC failed: {}", e);
+                }
+            }
+
+            rpc.send_and_confirm_transaction(&ata_tx).map_err(|e| {
+                AppError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("❌ Failed to create ATA: {}", e),
+                )
+            })?;
+
+            println!("✅ ATA created successfully for {}", to_wallet);
+        }
     }
 
     // Token transfer
     let amount = token_amount as u64;
 
     let transfer_ix: Instruction = transfer_checked(
-        &spl_token::ID,
+        &TOKEN_PROGRAM_ID,
         &payer_token_account,
         &mint,
         &recipient_token_account,
@@ -184,10 +217,10 @@ pub async fn send_tokens(to_wallet: &str, token_amount: i32) -> Result<(), AppEr
         )
     })?;
 
-    let recent_blockhash = rpc.get_latest_blockhash().map_err(|_| {
+    let blockhash = rpc.get_latest_blockhash().map_err(|_| {
         AppError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to fetch blockhash",
+            "Failed to fetch blockhash for transfer",
         )
     })?;
 
@@ -195,13 +228,13 @@ pub async fn send_tokens(to_wallet: &str, token_amount: i32) -> Result<(), AppEr
         &[transfer_ix],
         Some(&payer_pubkey),
         &[&payer],
-        recent_blockhash,
+        blockhash,
     );
 
     let sig = rpc.send_and_confirm_transaction(&tx).map_err(|e| {
         AppError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Transfer failed: {}", e),
+            format!("❌ Transfer failed: {}", e),
         )
     })?;
 
