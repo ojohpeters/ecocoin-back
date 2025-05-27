@@ -81,11 +81,19 @@ pub async fn add_referral_points(referrer_id: &Uuid) -> Result<(), sqlx::Error> 
 
 // Complete task
 pub async fn complete_task(wallet: &str, task_id: Uuid) -> Result<(), sqlx::Error> {
-    let user = sqlx::query!("SELECT id FROM users WHERE wallet_address = $1", wallet)
-        .fetch_one(&*DB_POOL)
-        .await?;
+    let user = sqlx::query!(
+        "SELECT id, has_claimed FROM users WHERE wallet_address = $1",
+        wallet
+    )
+    .fetch_one(&*DB_POOL)
+    .await?;
 
-    // Check for duplicates
+    // If the user has already claimed, they can't earn more from tasks
+    if user.has_claimed.unwrap_or(false) {
+        return Err(sqlx::Error::RowNotFound); // or create a custom error later
+    }
+
+    // Check if task is already completed
     let exists = sqlx::query!(
         "SELECT 1 as exists FROM completed_tasks WHERE user_id = $1 AND task_id = $2",
         user.id,
@@ -102,6 +110,7 @@ pub async fn complete_task(wallet: &str, task_id: Uuid) -> Result<(), sqlx::Erro
         .fetch_one(&*DB_POOL)
         .await?;
 
+    // Record task completion
     sqlx::query!(
         "INSERT INTO completed_tasks (user_id, task_id) VALUES ($1, $2)",
         user.id,
@@ -110,6 +119,7 @@ pub async fn complete_task(wallet: &str, task_id: Uuid) -> Result<(), sqlx::Erro
     .execute(&*DB_POOL)
     .await?;
 
+    // ✅ Add task points ONLY if user hasn't claimed
     sqlx::query!(
         "UPDATE users SET total_points = total_points + $1 WHERE id = $2",
         task.points,
@@ -216,4 +226,36 @@ pub async fn get_total_airdrops() -> Result<i64, sqlx::Error> {
         .fetch_one(&*DB_POOL)
         .await?;
     Ok(res.count.unwrap_or(0))
+}
+
+// pub async fn reset_user_points(wallet: &str) -> Result<(), sqlx::Error> {
+//     sqlx::query!(
+//         "UPDATE users SET total_points = 0 WHERE wallet_address = $1",
+//         wallet
+//     )
+//     .execute(&*DB_POOL)
+//     .await?;
+//     Ok(())
+// }
+
+// pub async fn clear_user_tasks(wallet: &str) -> Result<(), sqlx::Error> {
+//     let user = sqlx::query!("SELECT id FROM users WHERE wallet_address = $1", wallet)
+//         .fetch_one(&*DB_POOL)
+//         .await?;
+
+//     sqlx::query!("DELETE FROM completed_tasks WHERE user_id = $1", user.id)
+//         .execute(&*DB_POOL)
+//         .await?;
+//     Ok(())
+// }
+
+pub async fn deduct_user_points(wallet: &str, amount: i32) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE users SET total_points = total_points - $1 WHERE wallet_address = $2",
+        amount,
+        wallet
+    )
+    .execute(&*DB_POOL)
+    .await?;
+    Ok(())
 }

@@ -105,7 +105,9 @@ pub async fn get_airdrop_stats() -> Json<serde_json::Value> {
     }))
 }
 
-pub async fn get_referral_code(Query(params): Query<HashMap<String, String>>) -> Json<serde_json::Value> {
+pub async fn get_referral_code(
+    Query(params): Query<HashMap<String, String>>,
+) -> Json<serde_json::Value> {
     if let Some(wallet) = params.get("wallet") {
         match db::get_referral_code_by_wallet(wallet).await {
             Ok(code) => Json(json!({ "referral_code": code })),
@@ -116,36 +118,36 @@ pub async fn get_referral_code(Query(params): Query<HashMap<String, String>>) ->
     }
 }
 
-
-async fn claim_airdrop(Json(req): Json<ClaimRequest>) -> Json<serde_json::Value> {
+pub async fn claim_airdrop(Json(req): Json<ClaimRequest>) -> Json<serde_json::Value> {
     let user_info = db::get_user_info(&req.wallet_address).await.unwrap();
 
     if user_info.total_points < 1000 {
         return Json(json!({ "error": "Not enough points (min 1000)" }));
     }
 
-    if user_info.has_claimed {
-        return Json(json!({ "error": "Airdrop already claimed" }));
-    }
-
     let paid = solana::check_fee_paid(&req.wallet_address).await.unwrap();
+
     if !paid {
         return Json(json!({ "error": "Fee not detected" }));
     }
 
-    // Send tokens
-    let result = solana::send_tokens(&req.wallet_address, user_info.total_points).await;
-
-    match result {
+    // Send exactly 1000 tokens
+    match solana::send_tokens(&req.wallet_address, 1000).await {
         Ok(sig) => {
-            db::log_airdrop(&req.wallet_address, user_info.total_points as i64, &sig)
+            // Log airdrop + update DB
+            db::log_airdrop(&req.wallet_address, 1000, &sig)
                 .await
                 .unwrap();
-            db::set_claimed(&req.wallet_address).await.unwrap();
+
+            db::deduct_user_points(&req.wallet_address, 1000)
+                .await
+                .unwrap();
+
+            db::set_claimed(&req.wallet_address).await.unwrap(); // still needed
 
             Json(json!({
                 "status": "Airdrop sent",
-                "tokens": user_info.total_points,
+                "tokens": 1000,
                 "tx": sig
             }))
         }

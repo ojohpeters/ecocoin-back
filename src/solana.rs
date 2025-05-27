@@ -198,7 +198,7 @@ pub async fn send_tokens(to_wallet: &str, token_amount: i32) -> Result<String, A
     }
 
     // Token transfer
-    let amount = token_amount as u64;
+    let amount = (token_amount as u64) * 10u64.pow(TOKEN_DECIMALS as u32);
 
     let transfer_ix: Instruction = transfer_checked(
         &TOKEN_PROGRAM_ID,
