@@ -125,11 +125,22 @@ pub async fn claim_airdrop(Json(req): Json<ClaimRequest>) -> Json<serde_json::Va
         return Json(json!({ "error": "Not enough points (min 1000)" }));
     }
 
-    let paid = solana::check_fee_paid(&req.wallet_address).await.unwrap();
+    let paid_sig = solana::check_fee_paid(&req.wallet_address).await.unwrap();
+if paid_sig.is_none() {
+    return Json(json!({ "error": "Fee not detected" }));
+}
 
-    if !paid {
-        return Json(json!({ "error": "Fee not detected" }));
-    }
+let fee_tx = paid_sig.unwrap();
+
+// Check if already used
+let fee_valid = db::record_fee_if_new(&req.wallet_address, &fee_tx).await.unwrap();
+if !fee_valid {
+    return Json(json!({ "error": "Fee already used for previous claim" }));
+}
+
+ //   if !paid {
+   //     return Json(json!({ "error": "Fee not detected" }));
+    //}
 
     // Send exactly 1000 tokens
     match solana::send_tokens(&req.wallet_address, 1000).await {
@@ -144,6 +155,7 @@ pub async fn claim_airdrop(Json(req): Json<ClaimRequest>) -> Json<serde_json::Va
                 .unwrap();
 
             db::set_claimed(&req.wallet_address).await.unwrap(); // still needed
+	    db::mark_fee_used(&req.wallet_address, &fee_tx).await.unwrap();
 
             Json(json!({
                 "status": "Airdrop sent",
