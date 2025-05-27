@@ -198,7 +198,7 @@ pub async fn get_wallet_count() -> Result<i64, sqlx::Error> {
     Ok(row.count.unwrap_or(0))
 }
 
-pub async fn log_airdrop(wallet: &str, amount: i64, sig: &str) -> Result<(), sqlx::Error> {
+pub async fn log_airdrop(wallet: &str, amount: i32, sig: &str) -> Result<(), sqlx::Error> {
     sqlx::query!(
         "INSERT INTO airdrop_log (wallet_address, amount_sent, tx_signature)
          VALUES ($1, $2, $3)",
