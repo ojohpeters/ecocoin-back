@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{db, error::AppError, solana};
+use serde_json::json;
 
 #[derive(Deserialize)]
 struct ConnectWalletRequest {
@@ -33,7 +34,8 @@ pub fn routes() -> Router {
         .route("/api/user/complete_task", post(complete_task))
         .route("/api/user/points", get(get_points))
         .route("/api/user/claim_airdrop", post(claim_airdrop))
-        .route("/api/user/stats", get(get_user_stats))
+        .route("/api/airdrop/stats", get(get_airdrop_stats))
+        .route("/api/user/referral_code", get(get_referral_code))
 }
 
 pub async fn connect_wallet(
@@ -93,45 +95,60 @@ pub async fn get_points(
     Ok(Json(serde_json::json!(user_info)))
 }
 
-pub async fn get_user_stats() -> Result<Json<serde_json::Value>, AppError> {
-    let count = db::get_wallet_count().await.map_err(|_| {
-        AppError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to get wallet count",
-        )
-    })?;
+pub async fn get_airdrop_stats() -> Json<serde_json::Value> {
+    let wallet_count = db::get_wallet_count().await.unwrap_or(0);
+    let total_claims = db::get_total_airdrops().await.unwrap_or(0);
 
-    Ok(Json(serde_json::json!({ "total_wallets": count })))
+    Json(json!({
+        "wallets_registered": wallet_count,
+        "airdrops_sent": total_claims
+    }))
 }
 
-pub async fn claim_airdrop(
-    Json(req): Json<ClaimRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let user_info = db::get_user_info(&req.wallet_address)
-        .await
-        .map_err(|_| AppError::new(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
+pub async fn get_referral_code(Query(params): Query<HashMap<String, String>>) -> Json<serde_json::Value> {
+    if let Some(wallet) = params.get("wallet") {
+        match db::get_referral_code_by_wallet(wallet).await {
+            Ok(code) => Json(json!({ "referral_code": code })),
+            Err(_) => Json(json!({ "error": "Wallet not found" })),
+        }
+    } else {
+        Json(json!({ "error": "Missing wallet parameter" }))
+    }
+}
+
+
+async fn claim_airdrop(Json(req): Json<ClaimRequest>) -> Json<serde_json::Value> {
+    let user_info = db::get_user_info(&req.wallet_address).await.unwrap();
 
     if user_info.total_points < 1000 {
-        return Err(AppError::new(
-            StatusCode::BAD_REQUEST,
-            "Not enough points (min 1000)",
-        ));
+        return Json(json!({ "error": "Not enough points (min 1000)" }));
     }
 
-    let paid = solana::check_fee_paid(&req.wallet_address)
-        .await
-        .map_err(|_| AppError::new(StatusCode::INTERNAL_SERVER_ERROR, "Fee check failed"))?;
+    if user_info.has_claimed {
+        return Json(json!({ "error": "Airdrop already claimed" }));
+    }
 
+    let paid = solana::check_fee_paid(&req.wallet_address).await.unwrap();
     if !paid {
-        return Err(AppError::new(StatusCode::BAD_REQUEST, "Fee not detected"));
+        return Json(json!({ "error": "Fee not detected" }));
     }
 
-    solana::send_tokens(&req.wallet_address, user_info.total_points)
-        .await
-        .map_err(|e| AppError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
+    // Send tokens
+    let result = solana::send_tokens(&req.wallet_address, user_info.total_points).await;
 
-    Ok(Json(serde_json::json!({
-        "status": "Airdrop sent",
-        "tokens": user_info.total_points
-    })))
+    match result {
+        Ok(sig) => {
+            db::log_airdrop(&req.wallet_address, user_info.total_points as i64, &sig)
+                .await
+                .unwrap();
+            db::set_claimed(&req.wallet_address).await.unwrap();
+
+            Json(json!({
+                "status": "Airdrop sent",
+                "tokens": user_info.total_points,
+                "tx": sig
+            }))
+        }
+        Err(e) => Json(json!({ "error": e.to_string() })),
+    }
 }

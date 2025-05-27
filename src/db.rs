@@ -124,7 +124,7 @@ pub async fn complete_task(wallet: &str, task_id: Uuid) -> Result<(), sqlx::Erro
 // Fetch user points + completed tasks + referral count
 pub async fn get_user_info(wallet: &str) -> Result<UserInfo, sqlx::Error> {
     let user = sqlx::query!(
-        "SELECT id, total_points FROM users WHERE wallet_address = $1",
+        "SELECT id, total_points, has_claimed FROM users WHERE wallet_address = $1",
         wallet
     )
     .fetch_one(&*DB_POOL)
@@ -154,7 +154,22 @@ pub async fn get_user_info(wallet: &str) -> Result<UserInfo, sqlx::Error> {
         total_points: user.total_points.unwrap_or(0),
         tasks_completed: completed_tasks,
         referrals,
+        has_claimed: user.has_claimed.unwrap_or(false), // ✅ Add this
     })
+}
+
+pub async fn get_referral_code_by_wallet(wallet: &str) -> Result<String, sqlx::Error> {
+    let res = sqlx::query!(
+        "SELECT referral_code FROM users WHERE wallet_address = $1",
+        wallet
+    )
+    .fetch_one(&*DB_POOL)
+    .await?;
+
+    Ok(res
+        .referral_code
+        .expect("Referral code missing")
+        .to_string())
 }
 
 // Get all tasks
@@ -171,4 +186,34 @@ pub async fn get_wallet_count() -> Result<i64, sqlx::Error> {
         .await?;
 
     Ok(row.count.unwrap_or(0))
+}
+
+pub async fn log_airdrop(wallet: &str, amount: i64, sig: &str) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "INSERT INTO airdrop_log (wallet_address, amount_sent, tx_signature)
+         VALUES ($1, $2, $3)",
+        wallet,
+        amount,
+        sig
+    )
+    .execute(&*DB_POOL)
+    .await?;
+    Ok(())
+}
+
+pub async fn set_claimed(wallet: &str) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE users SET has_claimed = TRUE WHERE wallet_address = $1",
+        wallet
+    )
+    .execute(&*DB_POOL)
+    .await?;
+    Ok(())
+}
+
+pub async fn get_total_airdrops() -> Result<i64, sqlx::Error> {
+    let res = sqlx::query!("SELECT COUNT(*) as count FROM airdrop_log")
+        .fetch_one(&*DB_POOL)
+        .await?;
+    Ok(res.count.unwrap_or(0))
 }

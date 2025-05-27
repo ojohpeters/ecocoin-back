@@ -7,4 +7,5 @@ pub struct UserInfo {
     pub total_points: i32,
     pub tasks_completed: Vec<Uuid>,
     pub referrals: i64,
+    pub has_claimed: bool, // ✅ Add this line
 }

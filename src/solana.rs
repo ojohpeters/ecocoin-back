@@ -93,7 +93,7 @@ pub async fn check_fee_paid(user_wallet: &str) -> Result<bool, AppError> {
 
     Ok(false)
 }
-pub async fn send_tokens(to_wallet: &str, token_amount: i32) -> Result<(), AppError> {
+pub async fn send_tokens(to_wallet: &str, token_amount: i32) -> Result<String, AppError> {
     let rpc_url = env::var("SOLANA_RPC_URL")
         .map_err(|_| AppError::new(StatusCode::INTERNAL_SERVER_ERROR, "Missing SOLANA_RPC_URL"))?;
 
@@ -241,5 +241,6 @@ pub async fn send_tokens(to_wallet: &str, token_amount: i32) -> Result<(), AppEr
     println!("✅ Tokens sent: {} to {}", amount, to_wallet);
     println!("🔗 Tx: https://solscan.io/tx/{}", sig);
 
-    Ok(())
+    Ok(sig.to_string())
+
 }
