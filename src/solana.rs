@@ -19,7 +19,7 @@ use std::{env, str::FromStr};
 const REQUIRED_LAMPORTS: u64 = 6_000; // 0.006 SOL
 const TOKEN_DECIMALS: u8 = 6;
 
-pub async fn check_fee_paid(user_wallet: &str) -> Result<bool, AppError> {
+pub async fn check_fee_paid(user_wallet: &str) -> Result<Option<String>, AppError> {
     let rpc_url = env::var("SOLANA_RPC_URL")
         .map_err(|_| AppError::new(StatusCode::INTERNAL_SERVER_ERROR, "Missing SOLANA_RPC_URL"))?;
 
@@ -83,7 +83,7 @@ pub async fn check_fee_paid(user_wallet: &str) -> Result<bool, AppError> {
                                 .iter()
                                 .any(|k| Pubkey::from_str(k).unwrap() == user_pubkey)
                         {
-                            return Ok(true);
+                            return Ok(Some(sig.to_string()));
                         }
                     }
                 }
@@ -91,7 +91,7 @@ pub async fn check_fee_paid(user_wallet: &str) -> Result<bool, AppError> {
         }
     }
 
-    Ok(false)
+    Ok(None)
 }
 pub async fn send_tokens(to_wallet: &str, token_amount: i32) -> Result<String, AppError> {
     let rpc_url = env::var("SOLANA_RPC_URL")

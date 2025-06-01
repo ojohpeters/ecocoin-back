@@ -259,3 +259,43 @@ pub async fn deduct_user_points(wallet: &str, amount: i32) -> Result<(), sqlx::E
     .await?;
     Ok(())
 }
+
+pub async fn record_fee_if_new(wallet: &str, tx: &str) -> Result<bool, sqlx::Error> {
+    // Check if the transaction has already been recorded
+    let exists = sqlx::query!(
+        "SELECT used FROM fee_payments WHERE tx_signature = $1",
+        tx
+    )
+    .fetch_optional(&*DB_POOL)
+    .await?;
+
+    if let Some(record) = exists {
+        // Already recorded
+        if record.used.unwrap_or(false) {
+            Ok(false) // Already used
+        } else {
+            Ok(true) // Exists but unused
+        }
+    } else {
+        // Insert it as a new unused fee payment
+        sqlx::query!(
+            "INSERT INTO fee_payments (wallet_address, tx_signature) VALUES ($1, $2)",
+            wallet,
+            tx
+        )
+        .execute(&*DB_POOL)
+        .await?;
+        Ok(true)
+    }
+}
+
+pub async fn mark_fee_used(wallet: &str, tx: &str) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE fee_payments SET used = TRUE WHERE wallet_address = $1 AND tx_signature = $2",
+        wallet,
+        tx
+    )
+    .execute(&*DB_POOL)
+    .await?;
+    Ok(())
+}
